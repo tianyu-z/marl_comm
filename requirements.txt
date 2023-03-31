@@ -1,3 +1,4 @@
+-e git+https://github.com/Leo-xh/tianshou.git@7f23748347d6bf4aebce3931f7e57291012cd98d#egg=tianshou
 gym==0.26.2
 gym-notices==0.0.8
 gymnasium==0.28.1
@@ -12,5 +13,4 @@ Pygments==2.14.0
 pymunk==6.4.0
 PyYAML==6.0
 scipy==1.10.1
--e git+https://github.com/Leo-xh/tianshou.git@7f23748347d6bf4aebce3931f7e57291012cd98d#egg=tianshou
 tqdm==4.65.0
