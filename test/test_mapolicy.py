@@ -14,7 +14,11 @@ from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import Net
 from torch.utils.tensorboard import SummaryWriter
+import sys
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(root)
 from marl_comm.data import MACollector, MAReplayBuffer
 from marl_comm.env import MAEnvWrapper, get_MA_VectorEnv
 from marl_comm.ma_policy import MAPolicyManager

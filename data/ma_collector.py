@@ -10,12 +10,16 @@ from tianshou.data.batch import _alloc_by_keys_diff
 from tianshou.env import BaseVectorEnv, DummyVectorEnv
 from tianshou.policy import BasePolicy
 
+import sys, os
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(root)
 from marl_comm.data.ma_buffer import MAReplayBuffer
 from marl_comm.env import get_MA_VectorEnv
 
 
 class MACollector(Collector):
-
     def __init__(
         self,
         policy: BasePolicy,
@@ -51,37 +55,37 @@ class MACollector(Collector):
         """
         local_obs = self.env.reset()
 
-        self._ready_env_ids = np.array([
-            self.agent_idx[local_obs[env_i]["agent_id"]] * len(local_obs) +
-            env_i for env_i in range(len(local_obs))
-        ])
+        self._ready_env_ids = np.array(
+            [
+                self.agent_idx[local_obs[env_i]["agent_id"]] * len(local_obs) + env_i
+                for env_i in range(len(local_obs))
+            ]
+        )
         global_obs = []
         for agent_i in range(0, self.agent_num):
-            for _ in range(
-                    self.env.env_num):  # self.env.env_num is the num of MAEnvs
+            for _ in range(self.env.env_num):  # self.env.env_num is the num of MAEnvs
                 item = {
                     "agent_id": self.agents[agent_i],
                     "obs": np.empty_like(local_obs[0]["obs"]),
                 }
                 if "mask" in local_obs[0]:
-                    item["mask"] = [
-                        False for _ in range(len(local_obs[0]["mask"]))
-                    ]
+                    item["mask"] = [False for _ in range(len(local_obs[0]["mask"]))]
                 if "state" in local_obs[0]:
                     item["state"] = np.empty_like(local_obs[0]["state"])
                 global_obs.append(item)
 
         for local_env_i, obs in enumerate(local_obs):
-            global_env_i = (self.agent_idx[obs["agent_id"]] * len(local_obs) +
-                            local_env_i)
+            global_env_i = (
+                self.agent_idx[obs["agent_id"]] * len(local_obs) + local_env_i
+            )
             global_obs[global_env_i] = obs
 
         obs = global_obs
 
         if self.preprocess_fn:
-            obs = self.preprocess_fn(obs=global_obs,
-                                     env_id=self._ready_env_ids).get(
-                                         "obs", global_obs)
+            obs = self.preprocess_fn(obs=global_obs, env_id=self._ready_env_ids).get(
+                "obs", global_obs
+            )
         self.data.obs = obs
 
     def collect(
@@ -96,14 +100,16 @@ class MACollector(Collector):
         if n_step is not None:
             assert n_episode is None, (
                 "Only one of n_step or n_episode is allowed in Collector."
-                f"collect, got n_step={n_step}, n_episode={n_episode}.")
+                f"collect, got n_step={n_step}, n_episode={n_episode}."
+            )
             assert n_step > 0
         elif n_episode is not None:
             assert n_episode > 0
         else:
             raise TypeError(
                 "Please specify at least one (either n_step or n_episode) "
-                "in AsyncCollector.collect().")
+                "in AsyncCollector.collect()."
+            )
 
         ready_env_ids = self._ready_env_ids
 
@@ -140,12 +146,12 @@ class MACollector(Collector):
                             self._action_space.sample() for _ in ready_env_ids
                         ]
                     act_sample = self.policy.map_action_inverse(
-                        act_sample)  # type: ignore
+                        act_sample
+                    )  # type: ignore
                     self.data.update(act=act_sample)
                 else:
                     if no_grad:
-                        with torch.no_grad(
-                        ):  # faster than retain_grad version
+                        with torch.no_grad():  # faster than retain_grad version
                             # self.data.obs will be used by agent to get result
                             result = self.policy(self.data, last_state)
                     else:
@@ -164,21 +170,16 @@ class MACollector(Collector):
                 # get bounded and remapped actions first (not saved into buffer)
                 action_remap = self.policy.map_action(self.data.act)
                 # step in env
-                result = self.env.step(action_remap,
-                                       ready_env_ids)  # type: ignore
+                result = self.env.step(action_remap, ready_env_ids)  # type: ignore
                 obs_next, rew, done, info = result
 
                 _rew = np.take_along_axis(
-                    rew,
-                    np.expand_dims(ready_env_ids, -1) // self.maenv_num,
-                    -1).reshape(-1)
+                    rew, np.expand_dims(ready_env_ids, -1) // self.maenv_num, -1
+                ).reshape(-1)
 
                 rew = np.array(rew).transpose(1, 0).reshape(-1)
 
-                self.data.update(obs_next=obs_next,
-                                 done=done,
-                                 info=info,
-                                 rew=_rew)
+                self.data.update(obs_next=obs_next, done=done, info=info, rew=_rew)
 
                 if self.preprocess_fn:
                     self.data.update(
@@ -188,7 +189,8 @@ class MACollector(Collector):
                             done=self.data.done,
                             info=self.data.info,
                             env_id=ready_env_ids,
-                        ))
+                        )
+                    )
                     rew = self.preprocess_fn(rew=rew, env_id=ready_env_ids)
 
                 if render:
@@ -206,8 +208,7 @@ class MACollector(Collector):
                     whole_data.rew = rew
 
                 except ValueError:
-                    _alloc_by_keys_diff(whole_data, self.data, self.env_num,
-                                        False)
+                    _alloc_by_keys_diff(whole_data, self.data, self.env_num, False)
                     whole_data[ready_env_ids] = self.data  # lots of overhead
 
                 # major differnece from the async case
@@ -225,10 +226,10 @@ class MACollector(Collector):
                     env_ind_local = np.where(done)[0]
                     env_ind_global = ready_env_ids[env_ind_local]
                     ptr, ep_rew, ep_len, ep_idx = self.buffer.add(
-                        last_data[env_ind_local], env_ind_global)
+                        last_data[env_ind_local], env_ind_global
+                    )
                     left_env_ids = [
-                        e_id for e_id in left_env_ids
-                        if e_id not in env_ind_global
+                        e_id for e_id in left_env_ids if e_id not in env_ind_global
                     ]
 
                     episode_count += len(env_ind_local)
@@ -240,8 +241,8 @@ class MACollector(Collector):
                     obs_reset = self.env.reset(env_ind_global)
                     if self.preprocess_fn:
                         obs_reset = self.preprocess_fn(
-                            obs=obs_reset,
-                            env_id=env_ind_global).get("obs", obs_reset)
+                            obs=obs_reset, env_id=env_ind_global
+                        ).get("obs", obs_reset)
                     last_data.obs_next[env_ind_local] = obs_reset
                     for i in env_ind_local:
                         self._reset_state(i)
@@ -250,8 +251,7 @@ class MACollector(Collector):
                     whole_data.obs[ready_env_ids] = last_data.obs_next
 
                 except ValueError:
-                    _alloc_by_keys_diff(whole_data, self.data, self.env_num,
-                                        False)
+                    _alloc_by_keys_diff(whole_data, self.data, self.env_num, False)
                     self.data.obs = last_data.obs_next
                     whole_data[ready_env_ids] = self.data  # lots of overhead
 
@@ -259,13 +259,13 @@ class MACollector(Collector):
                 obs_next = last_whole_data.obs_next
                 for key in ["agent_id", "obs", "mask"]:
                     if key in obs_next:
-                        obs_next[key] = whole_data.obs_next[last_left_env_ids][
-                            key]
+                        obs_next[key] = whole_data.obs_next[last_left_env_ids][key]
                 last_whole_data.obs_next = obs_next
 
                 # add data into the buffer
                 ptr, ep_rew, ep_len, ep_idx = self.buffer.add(
-                    last_whole_data, last_left_env_ids)
+                    last_whole_data, last_left_env_ids
+                )
 
             last_whole_data = whole_data[left_env_ids]
             last_left_env_ids = left_env_ids
@@ -276,7 +276,8 @@ class MACollector(Collector):
 
             self.data = whole_data
             if (n_step and step_count >= n_step) or (
-                    n_episode and episode_count >= n_episode):
+                n_episode and episode_count >= n_episode
+            ):
                 break
 
         self._ready_env_ids = ready_env_ids
@@ -288,13 +289,12 @@ class MACollector(Collector):
 
         if episode_count > 0:
             rews, lens, idxs = list(
-                map(np.concatenate,
-                    [episode_rews, episode_lens, episode_start_indices]))
+                map(np.concatenate, [episode_rews, episode_lens, episode_start_indices])
+            )
             rew_mean, rew_std = rews.mean(), rews.std()
             len_mean, len_std = lens.mean(), lens.std()
         else:
-            rews, lens, idxs = np.array([]), np.array([], int), np.array([],
-                                                                         int)
+            rews, lens, idxs = np.array([]), np.array([], int), np.array([], int)
             rew_mean = rew_std = len_mean = len_std = 0
 
         return {

@@ -1,6 +1,10 @@
 import pettingzoo.butterfly.pistonball_v6 as pistonball_v6
 from tianshou.env import BaseVectorEnv, SubprocVectorEnv
+import sys, os
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(root)
 from marl_comm.env import MAEnvWrapper, get_MA_VectorEnv_cls
 
 # single env

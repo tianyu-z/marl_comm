@@ -1,0 +1,3 @@
+pymunk==1.6.0
+pettingzoo==1.16.0
+tianshou@git+https://github.com/xihuai18/tianshou.git
