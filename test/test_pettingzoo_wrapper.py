@@ -1,3 +1,5 @@
+# pass test with newest version of pettingzoo and tianshou
+
 import pettingzoo.butterfly.pistonball_v6 as pistonball_v6
 from tianshou.env import BaseVectorEnv, SubprocVectorEnv
 import sys, os
@@ -14,10 +16,16 @@ obs = env.reset()
 # print("init obs:", obs)
 act = env.action_space.sample()
 print("act:", act)
-obs, reward, done, info = env.step(act)
+x = env.step(act)
+if len(x) == 4:
+    obs, rew, term, info = env.step(act)
+elif len(x) == 5:
+    obs, rew, term, trunc, info = env.step(act)
+    print("trunc:", trunc)
 # print("next_obs:", obs)
-print("reward:", reward)
-print("done:", done)
+print("reward:", rew)
+print("term:", term)
+
 print("info:", info)
 print("action space", env.action_space)
 print("observation space", env.observation_space)
@@ -38,10 +46,15 @@ obs = venv.reset()
 # print("init obs:", obs)
 act = [act_sp.sample() for act_sp in venv.get_env_attr("action_space")]
 print("act:", act)
-obs, reward, done, info = venv.step(act)
+if len(venv.step(act)) == 4:
+    obs, rew, term, info = venv.step(act)
+elif len(venv.step(act)) == 5:
+    obs, rew, term, trunc, info = venv.step(act)
+    print("trunc:", trunc)
 # print("next_obs:", obs)
-print("reward:", reward)
-print("done:", done)
+print("reward:", rew)
+print("term:", term)
+
 print("info:", info)
 print("action space", venv.action_space)
 print("observation space", venv.observation_space)

@@ -1,3 +1,4 @@
+# pass test with newest version of pettingzoo and tianshou
 from typing import List, Tuple, Type
 
 from tianshou.data import ReplayBuffer

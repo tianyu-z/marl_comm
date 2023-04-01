@@ -15,10 +15,16 @@ class MAEnvWrapper(PettingZooEnv):
 
         Append env_id to the returned info.
         """
-        obs, rew, done, info = super().step(action)
-        info["env_id"] = self.agent_idx[obs["agent_id"]]
+        x = super().step(action)
+        if len(x) == 4:
+            obs, rew, done, info = super().step(action)
+            info["env_id"] = self.agent_idx[obs["agent_id"]]
+            return obs, rew, done, info
 
-        return obs, rew, done, info
+        elif len(x) == 5:
+            obs, rew, term, trunc, info = super().step(action)
+            info["env_id"] = self.agent_idx[obs["agent_id"]]
+            return obs, rew, term, trunc, info
 
     def __len__(self) -> int:
         return self.num_agents
@@ -30,8 +36,12 @@ MAVectorEnv has the layout [(agent0, env0), (agent0, env1), ..., (agent1, env0),
 """
 
 
-def ma_venv_init(self: BaseVectorEnv, p_cls: Type[BaseVectorEnv],
-                 env_fns: List[Callable[[], gym.Env]], **kwargs: Any) -> None:
+def ma_venv_init(
+    self: BaseVectorEnv,
+    p_cls: Type[BaseVectorEnv],
+    env_fns: List[Callable[[], gym.Env]],
+    **kwargs: Any
+) -> None:
     """add agents relevant attrs
 
     :param BaseVectorEnv self
@@ -80,13 +90,23 @@ def ma_venv_step(
         id = np.array(id)
         for _i, _id in enumerate(id):
             id[_i] = _id % self.env_num
-    obs_stack, rew_stack, done_stack, info_stack = self.p_cls.step(
-        self, action, id)
-    for obs, info in zip(obs_stack, info_stack):
-        # self.env_num is the number of environments, while the env_num in collector is `the number of agents` * `the number of environments`
-        info["env_id"] = self.agent_idx[
-            obs["agent_id"]] * self.env_num + info["env_id"]
-    return obs_stack, rew_stack, done_stack, info_stack
+    x = self.p_cls.step(self, action, id)
+    if len(x) == 4:
+        obs_stack, rew_stack, done_stack, info_stack = x
+        for obs, info in zip(obs_stack, info_stack):
+            # self.env_num is the number of environments, while the env_num in collector is `the number of agents` * `the number of environments`
+            info["env_id"] = (
+                self.agent_idx[obs["agent_id"]] * self.env_num + info["env_id"]
+            )
+        return obs_stack, rew_stack, done_stack, info_stack
+    elif len(x) == 5:
+        obs_stack, rew_stack, term_stack, trunc_stack, info_stack = x
+        for obs, info in zip(obs_stack, info_stack):
+            # self.env_num is the number of environments, while the env_num in collector is `the number of agents` * `the number of environments`
+            info["env_id"] = (
+                self.agent_idx[obs["agent_id"]] * self.env_num + info["env_id"]
+            )
+        return obs_stack, rew_stack, term_stack, trunc_stack, info_stack
 
 
 def get_MA_VectorEnv_cls(p_cls: Type[BaseVectorEnv]) -> Type[BaseVectorEnv]:
@@ -94,24 +114,21 @@ def get_MA_VectorEnv_cls(p_cls: Type[BaseVectorEnv]) -> Type[BaseVectorEnv]:
     Get the class of Multi-Agent VectorEnv.
     """
 
-    def init_func(self: BaseVectorEnv, env_fns: List[Callable[[], gym.Env]],
-                  **kwargs: Any) -> None:
+    def init_func(
+        self: BaseVectorEnv, env_fns: List[Callable[[], gym.Env]], **kwargs: Any
+    ) -> None:
         ma_venv_init(self, p_cls, env_fns, **kwargs)
 
     name = "MA" + p_cls.__name__
 
-    attr_dict = {
-        "__init__": init_func,
-        "__len__": ma_venv_len,
-        "step": ma_venv_step
-    }
+    attr_dict = {"__init__": init_func, "__len__": ma_venv_len, "step": ma_venv_step}
 
-    return type(name, (p_cls, ), attr_dict)
+    return type(name, (p_cls,), attr_dict)
 
 
-def get_MA_VectorEnv(p_cls: Type[BaseVectorEnv],
-                     env_fns: List[Callable[[], gym.Env]],
-                     **kwargs: Any) -> BaseVectorEnv:
+def get_MA_VectorEnv(
+    p_cls: Type[BaseVectorEnv], env_fns: List[Callable[[], gym.Env]], **kwargs: Any
+) -> BaseVectorEnv:
     """
     Get an instance of Multi-Agent VectorEnv.
     """

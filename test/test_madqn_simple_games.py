@@ -1,4 +1,3 @@
-# pass test with newest version of pettingzoo and tianshou
 import argparse
 import os
 from typing import List, Optional, Tuple
@@ -7,14 +6,23 @@ import gym
 import numpy as np
 import pettingzoo.butterfly.pistonball_v6 as pistonball_v6
 import torch
-from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.data import VectorReplayBuffer
 from tianshou.env import DummyVectorEnv, SubprocVectorEnv
 from tianshou.env.pettingzoo_env import PettingZooEnv
-from tianshou.policy import BasePolicy, DQNPolicy, MultiAgentPolicyManager
+from tianshou.policy import BasePolicy, DQNPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import Net
 from torch.utils.tensorboard import SummaryWriter
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(root)
+from marl_comm.data import MACollector, MAReplayBuffer
+from marl_comm.env import MAEnvWrapper, get_MA_VectorEnv
+from marl_comm.ma_policy import MAPolicyManager
+from marl_comm.games import dilemma_pettingzoo
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -28,7 +36,7 @@ def get_parser() -> argparse.ArgumentParser:
         "--gamma", type=float, default=0.9, help="a smaller gamma favors earlier win"
     )
     parser.add_argument(
-        "--n-pistons", type=int, default=10, help="Number of pistons(agents) in the env"
+        "--n-agents", type=int, default=2, help="Number of agents in the env"
     )
     parser.add_argument("--n-step", type=int, default=100)
     parser.add_argument("--target-update-freq", type=int, default=320)
@@ -61,7 +69,7 @@ def get_args() -> argparse.Namespace:
 
 
 def get_env(args: argparse.Namespace = get_args()):
-    return PettingZooEnv(pistonball_v6.env(continuous=False, n_pistons=args.n_pistons))
+    return MAEnvWrapper(dilemma_pettingzoo.env(max_cycles=10000))
 
 
 def get_agents(
@@ -75,15 +83,15 @@ def get_agents(
         if isinstance(env.observation_space, gym.spaces.Dict)
         else env.observation_space
     )
-    args.state_shape = observation_space.shape or observation_space.n
+    args.state_shape = (
+        observation_space["observation"].shape or observation_space["observation"].n
+    )
     args.action_shape = env.action_space.shape or env.action_space.n
-
-    # print(args.state_shape)
 
     if agents is None:
         agents = []
         optims = []
-        for _ in range(args.n_pistons):
+        for _ in range(args.n_agents):
             # model
             net = Net(
                 args.state_shape,
@@ -102,8 +110,15 @@ def get_agents(
             agents.append(agent)
             optims.append(optim)
 
-    policy = MultiAgentPolicyManager(agents, env)
+    policy = MAPolicyManager(agents, env, train_scheme="FD")
     return policy, optims, env.agents
+
+
+def get_buffer(args: argparse.Namespace = get_args()):
+    env = get_env()
+    return MAReplayBuffer(
+        args.buffer_size, env.agents, VectorReplayBuffer, args.training_num
+    )
 
 
 def train_agent(
@@ -111,8 +126,18 @@ def train_agent(
     agents: Optional[List[BasePolicy]] = None,
     optims: Optional[List[torch.optim.Optimizer]] = None,
 ) -> Tuple[dict, BasePolicy]:
-    train_envs = SubprocVectorEnv([get_env for _ in range(args.training_num)])
-    test_envs = SubprocVectorEnv([get_env for _ in range(args.test_num)])
+    # train_envs = get_MA_VectorEnv(
+    #     SubprocVectorEnv, [get_env for _ in range(args.training_num)]
+    # )
+    # test_envs = get_MA_VectorEnv(
+    #     SubprocVectorEnv, [get_env for _ in range(args.test_num)]
+    # )
+    train_envs = get_MA_VectorEnv(
+        DummyVectorEnv, [get_env for _ in range(args.training_num)]
+    )
+    test_envs = get_MA_VectorEnv(
+        DummyVectorEnv, [get_env for _ in range(args.test_num)]
+    )
     # seed
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -122,13 +147,10 @@ def train_agent(
     policy, optim, agents = get_agents(args, agents=agents, optims=optims)
 
     # collector
-    train_collector = Collector(
-        policy,
-        train_envs,
-        VectorReplayBuffer(args.buffer_size, len(train_envs)),
-        exploration_noise=True,
+    train_collector = MACollector(
+        policy, train_envs, get_buffer(args), exploration_noise=True
     )
-    test_collector = Collector(policy, test_envs, exploration_noise=True)
+    test_collector = MACollector(policy, test_envs)
     train_collector.collect(n_step=args.batch_size * args.training_num)
     # log
     log_path = os.path.join(args.logdir, "pistonball", "dqn")
@@ -139,8 +161,9 @@ def train_agent(
     def save_best_fn(policy):
         pass
 
-    def stop_fn(mean_rewards):
-        return False
+    # def stop_fn(mean_rewards):
+    #     return False
+    stop_fn = None
 
     def train_fn(epoch, env_step):
         [agent.set_eps(args.eps_train) for agent in policy.policies.values()]
@@ -149,7 +172,8 @@ def train_agent(
         [agent.set_eps(args.eps_test) for agent in policy.policies.values()]
 
     def reward_metric(rews):
-        return rews[:, 0]
+        print("rews:", rews)
+        return rews[0]
 
     # trainer
     result = offpolicy_trainer(
@@ -167,6 +191,7 @@ def train_agent(
         save_best_fn=save_best_fn,
         update_per_step=args.update_per_step,
         logger=logger,
+        verbose=True,
         test_in_train=False,
         reward_metric=reward_metric,
     )
@@ -177,17 +202,17 @@ def train_agent(
 def watch(
     args: argparse.Namespace = get_args(), policy: Optional[BasePolicy] = None
 ) -> None:
-    env = DummyVectorEnv([get_env])
+    env = get_MA_VectorEnv(DummyVectorEnv, [get_env])
     policy.eval()
     [agent.set_eps(args.eps_test) for agent in policy.policies.values()]
-    collector = Collector(policy, env, exploration_noise=True)
+    collector = MACollector(policy, env)
     result = collector.collect(n_episode=1, render=args.render)
     # print(collector.data)
     rews, lens = result["rews"], result["lens"]
-    print(f"Final reward: {rews[:, 0].mean()}, length: {lens.mean()}")
+    print(f"Final reward: {rews[0].mean()}, length: {lens.mean()}")
 
 
-def test_piston_ball(args=get_args()):
+def test_simple_games(args=get_args()):
     import pprint
 
     if args.watch:
@@ -204,4 +229,4 @@ def test_piston_ball(args=get_args()):
 
 
 if __name__ == "__main__":
-    test_piston_ball(get_args())
+    test_simple_games(get_args())
